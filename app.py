@@ -121,6 +121,7 @@ import dash_core_components as dcc
 import dash_html_components as html
 import pandas as pd
 from datetime import datetime as dt
+import plotly.express as px
 from dateutil import parser
 import pytz
 
@@ -150,6 +151,15 @@ total = agg_null.groupby(['publicAddress'])[[c for c in agg_null.columns if isin
 df = (booked.sum(axis=1)/total).reset_index()
 df.columns = ['publicAddress', 'demand']
 print(df.head())
+
+us_cities = pd.read_csv("https://raw.githubusercontent.com/plotly/datasets/master/us-cities-top-1k.csv")
+
+token = open(".mapbox").read()
+
+fig = px.scatter_mapbox(us_cities, lat="lat", lon="lon", hover_name="City", hover_data=["State", "Population"],
+                        color_discrete_sequence=["fuchsia"], zoom=3, height=300)
+fig.update_layout(mapbox_style="dark", mapbox_accesstoken=token)
+fig.update_layout(margin={"r":0,"t":0,"l":0,"b":0})
 
 app = dash.Dash(__name__)
 
@@ -183,8 +193,9 @@ app.layout = html.Div([
             data=df.to_dict('records'),
             page_size=10,
             row_selectable='single',
-        )
+        ),
 
+        dcc.Graph(figure=fig)
     ],
     style={'width': '48%', 'display': 'inline-block'}),
 
