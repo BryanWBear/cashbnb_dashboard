@@ -7,121 +7,101 @@ import plotly.graph_objs as go
 import pandas as pd
 from datetime import datetime as dt
 import plotly.express as px
-from dateutil import parser
-import pytz
-
-def is_datestring(string):
-    try:
-        parser.parse(string)
-        return True
-    except:
-        return False
+from graph_utils import create_map_scatter
+from helper_utils import *
 
 px.set_mapbox_access_token(open(".mapbox").read())
 
-df = pd.read_parquet('/Users/bryanwang/Desktop/cashbnb/analysis/combined.parquet')
-
-# limit to SF for now
-df = df[df.publicAddress == 'San Francisco, CA, United States']
-
-# fill NA for plotting reasons
-df.fillna("NaN", inplace=True)
+df = pd.read_parquet('/Users/bryanwang/Desktop/cashbnb/analysis/combined_nongraph.parquet')
+pa = pd.read_csv('/Users/bryanwang/Desktop/cashbnb/analysis/publicAddress.csv')
 
 days = [c for c in df.columns if is_datestring(c)]
 
-frames = [{
-        # 'traces':[0],
-        'name':'frame_{}'.format(day),
-        'data':[{
-            'type':'scattermapbox',
-            'lat':df['lat'],
-            'lon':df['long'],
-            'marker':go.scattermapbox.Marker(
-                color = df[day],
-                showscale=True,
-            ),
-            # 'customdata':np.stack((df.xs(day)['confirmed_display'], df.xs(day)['recovered_display'],  df.xs(day)['deaths_display'], pd.Series(df.xs(day).index)), axis=-1),
-            # 'hovertemplate': "<extra></extra><em>%{customdata[3]}  </em><br>🚨  %{customdata[0]}<br>🏡  %{customdata[1]}<br>⚰️  %{customdata[2]}",
-        }],           
-    } for day in days
-]
-
-data = frames[-1]['data']
-active_frame = 0
-
-sliders = [{
-    'active':active_frame,
-    'transition':{'duration': 0},
-    'x':0.08,     #slider starting position  
-    'len':0.88,
-    'currentvalue':{
-        'font':{'size':15}, 
-        'prefix':'📅 ', # Day:
-        'visible':True, 
-        'xanchor':'center'
-        },  
-    'steps':[{
-        'method':'animate',
-        'args':[
-            ['frame_{}'.format(day)],
-            {
-                'mode':'immediate',
-                'frame':{'duration':250, 'redraw': True}, #100
-                'transition':{'duration':100} #50
-            }
-            ],
-        'label':day
-    } for day in days]
-}]
-
-play_button = [{
-    'type':'buttons',
-    'showactive':True,
-    'y':-0.08,
-    'x':0.045,
-    'buttons':[{
-        'label':'🎬', # Play
-        'method':'animate',
-        'args':[
-            None,
-            {
-                'frame':{'duration':250, 'redraw':True}, #100
-                'transition':{'duration':100}, #50
-                'fromcurrent':True,
-                'mode':'immediate',
-            }
-        ]
-    }]
-}]
-
-# fig = px.scatter_mapbox(df[df['publicAddress'] == 'San Francisco, CA, United States'], 
-#     lat="lat", 
-#     lon="long", 
-#     color=days[0],
-#     height=850)
-
-layout = go.Layout(
-    height=600,
-    autosize=True,
-    hovermode='closest',
-    paper_bgcolor='rgba(0,0,0,0)',
-    mapbox={
-        'accesstoken':open(".mapbox").read(),
-        # 'bearing':0,
-        'center':{"lat": df['lat'].median(), "lon": df['long'].median()},
-        # 'pitch':0,
-        'zoom':10,
-        'style':'dark',
-    },
-    updatemenus=play_button,
-    sliders=sliders,
-    margin={"r":0,"t":0,"l":0,"b":0}
-)
+print("finished reading files")
 
 app = dash.Dash(__name__)
 
+@app.callback(
+    dash.dependencies.Output('map','figure'),
+    [dash.dependencies.Input('demand-table', "derived_virtual_selected_rows"), 
+    dash.dependencies.Input('personCapacity-dropdown', "value"),
+    dash.dependencies.Input('minNights-dropdown', "value"),
+    dash.dependencies.Input('reviewsCount-dropdown', "value")])
+def update_map(derived_virtual_selected_rows, personCapacity, minNights, reviewsCount):
+    if derived_virtual_selected_rows is None or derived_virtual_selected_rows == []:
+        address = 'San Francisco, CA, United States'
+    else:
+        address = pa.iloc[derived_virtual_selected_rows[0]].publicAddress
+
+    print(f"i'm in the callback with address: {address}")
+
+    sub_df = df[df.publicAddress == address]
+
+    if isinstance(personCapacity, int):
+        sub_df = sub_df[sub_df.personCapacity == personCapacity]
+
+    if isinstance(minNights, int):
+        sub_df = sub_df[sub_df.minNights == minNights]
+
+    if isinstance(reviewsCount, int):
+        sub_df = sub_df[sub_df.reviewsCount >= reviewsCount]
+
+    return create_map_scatter(sub_df)
+
+
+
 app.layout = html.Div([
-    dcc.Graph(figure=go.Figure(data=data, layout=layout, frames=frames), id='map'),
+    html.Div([
+        dcc.Graph(figure=create_map_scatter(df[df.publicAddress == 'San Francisco, CA, United States']), 
+        id='map')
+    ],style={'width': '70%', 'display': 'inline-block'}),
+    html.Div([
+        html.H2(children='Location'),
+        dash_table.DataTable(
+            id='demand-table',
+            columns=[{"name": i, "id": i} for i in pa.columns],
+            data=pa.to_dict('records'),
+            page_size=10,
+            row_selectable='single',
+        ),
+        html.H2(children='Person Capacity'),
+        dcc.Dropdown(
+        id='personCapacity-dropdown',
+        options=[
+            {'label': '2', 'value': 2},
+            {'label': '3', 'value': 3},
+            {'label': '4', 'value': 4},
+            {'label': '6', 'value': 6},
+            {'label': 'all', 'value': 'all'},
+        ],
+        value='all'
+        ),
+        html.H2(children='Minimum Nights'),
+        dcc.Dropdown(
+        id='minNights-dropdown',
+        options=[
+            {'label': '1', 'value': 1},
+            {'label': '2', 'value': 2},
+            {'label': '3', 'value': 3},
+            {'label': '4', 'value': 4},
+            {'label': '30', 'value': 30},
+            {'label': 'all', 'value': 'all'},
+        ],
+        value='all'
+        ),
+        html.H2(children='Reviews Count'),
+        dcc.Dropdown(
+        id='reviewsCount-dropdown',
+        options=[
+            {'label': '>= 10', 'value': 10},
+            {'label': '>= 20', 'value': 20},
+            {'label': '>= 30', 'value': 30},
+            {'label': 'all', 'value': 'all'},
+        ],
+        value='all'
+        )
+    ],style={'width': '28%', 'float': 'right', 'display': 'inline-block'}, 
+    id='conditional-graph')
 ])
 
 
